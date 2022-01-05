@@ -1,0 +1,18 @@
+[project]
+name = "city-swaps-contracts"
+requirements = []
+[contracts.miamicoin-token]
+path = "contracts/external/miamicoin-token.clar"
+depends_on = ["sip-010-trait-ft-standard"]
+
+[contracts.newyorkcitycoin-token]
+path = "contracts/external/newyorkcitycoin-token.clar"
+depends_on = ["sip-010-trait-ft-standard"]
+
+[contracts.proposal]
+path = "contracts/proposal.clar"
+depends_on = []
+
+[contracts.sip-010-trait-ft-standard]
+path = "contracts/external/sip-010-trait-ft-standard.clar"
+depends_on = []
