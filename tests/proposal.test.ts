@@ -5,8 +5,6 @@ import {
   run,
   Account,
   assertNotEquals,
-  assertEquals,
-  types,
 } from "../deps.ts";
 import { Proposal } from "../models/proposal.model.ts";
 import { MiamiCoin } from "../models/miamicoin.model.ts";
@@ -45,7 +43,7 @@ describe("[PROPOSE]", () => {
     it("succeeds and creates one proposal", () => {
       const receipt = ctx.chain.mineBlock([
         proposal.setCoin(deployer, mia.address),
-        proposal.create(creator, mia.address, hash, category),
+        proposal.create(creator, mia.address, hash, category, 0),
       ]).receipts[0];
 
       receipt.result.expectOk();
@@ -54,12 +52,27 @@ describe("[PROPOSE]", () => {
 
     it("throws an error if coin is not supported", () => {
       const receipt = ctx.chain.mineBlock([
-        proposal.create(creator, mia.address, hash, category),
+        proposal.create(creator, mia.address, hash, category, 0),
       ]).receipts[0];
 
       receipt.result
         .expectErr()
         .expectUint(Proposal.Err.ERR_COIN_NOT_SUPPORTED);
+    });
+
+    it("throws an error if external-id has already been used", () => {
+      ctx.chain.mineBlock([
+        proposal.setCoin(deployer, mia.address),
+        proposal.create(creator, mia.address, hash, category, 0),
+      ]).receipts[0];
+
+      const receipt = ctx.chain.mineBlock([
+        proposal.create(creator, mia.address, hash, category, 0),
+      ]).receipts[0];
+
+      receipt.result
+        .expectErr()
+        .expectUint(Proposal.Err.ERR_EXTERNAL_ID_ALREADY_USED);
     });
   });
 
@@ -67,9 +80,9 @@ describe("[PROPOSE]", () => {
     it("succeeds and edits one proposal", () => {
       ctx.chain.mineBlock([
         proposal.setCoin(deployer, mia.address),
-        proposal.create(creator, mia.address, hash, category),
+        proposal.create(creator, mia.address, hash, category, 0),
       ]);
-      ctx.chain.mineBlock([proposal.edit(creator, 0, hash)]);
+      ctx.chain.mineBlock([proposal.edit(creator, 1, hash)]);
       proposal.getProposalCount().expectUint(1);
     });
 
@@ -77,9 +90,9 @@ describe("[PROPOSE]", () => {
       const editor = ctx.accounts.get("wallet_2")!;
       ctx.chain.mineBlock([
         proposal.setCoin(deployer, mia.address),
-        proposal.create(creator, mia.address, hash, category),
+        proposal.create(creator, mia.address, hash, category, 0),
       ]);
-      const receipt = ctx.chain.mineBlock([proposal.edit(editor, 0, hash)])
+      const receipt = ctx.chain.mineBlock([proposal.edit(editor, 1, hash)])
         .receipts[0];
 
       receipt.result.expectErr().expectUint(Proposal.Err.ERR_UNAUTHORIZED);
@@ -97,11 +110,11 @@ describe("[PROPOSE]", () => {
     it("updates proposal hash", () => {
       ctx.chain.mineBlock([
         proposal.setCoin(deployer, mia.address),
-        proposal.create(creator, mia.address, hash, category),
+        proposal.create(creator, mia.address, hash, category, 0),
       ]);
-      const initialProposal = proposal.getProposal(0);
-      ctx.chain.mineBlock([proposal.edit(creator, 0, hash2)]);
-      const editedProposal = proposal.getProposal(0);
+      const initialProposal = proposal.getProposal(1);
+      ctx.chain.mineBlock([proposal.edit(creator, 1, hash2)]);
+      const editedProposal = proposal.getProposal(1);
 
       assertNotEquals(initialProposal, editedProposal);
     });
@@ -113,12 +126,12 @@ describe("[PROPOSE]", () => {
 
       ctx.chain.mineBlock([
         proposal.setCoin(deployer, mia.address),
-        proposal.create(creator, mia.address, hash, category),
+        proposal.create(creator, mia.address, hash, category, 0),
         mia.mint(amount, funder),
       ]);
 
       const receipt = ctx.chain.mineBlock([
-        proposal.fund(funder, mia.address, 0, 100),
+        proposal.fund(funder, mia.address, 1, 100),
       ]).receipts[0];
 
       // Transfer to proposal creator
@@ -138,18 +151,36 @@ describe("[PROPOSE]", () => {
       );
     });
 
+    it("fails if user is trying to fund with less than 100 tokens", () => {
+      const amount = 98;
+
+      ctx.chain.mineBlock([
+        proposal.setCoin(deployer, mia.address),
+        proposal.create(creator, mia.address, hash, category, 0),
+        mia.mint(amount, funder),
+      ]);
+
+      const receipt = ctx.chain.mineBlock([
+        proposal.fund(funder, mia.address, 1, 99),
+      ]).receipts[0];
+
+      receipt.result
+        .expectErr()
+        .expectUint(Proposal.Err.ERR_INSUFFICIENT_FUNDING_AMOUNT);
+    });
+
     it("throws an error if user doesn't have enough city coins for proposal", () => {
       // fee is 1% so minting 1 less than amount - fee
       const amount = 98;
 
       ctx.chain.mineBlock([
         proposal.setCoin(deployer, mia.address),
-        proposal.create(creator, mia.address, hash, category),
+        proposal.create(creator, mia.address, hash, category, 0),
         mia.mint(amount, funder),
       ]);
 
       const receipt = ctx.chain.mineBlock([
-        proposal.fund(funder, mia.address, 0, 100),
+        proposal.fund(funder, mia.address, 1, 100),
       ]).receipts[0];
 
       receipt.result
@@ -163,12 +194,12 @@ describe("[PROPOSE]", () => {
 
       ctx.chain.mineBlock([
         proposal.setCoin(deployer, mia.address),
-        proposal.create(creator, mia.address, hash, category),
+        proposal.create(creator, mia.address, hash, category, 0),
         mia.mint(amount, funder),
       ]);
 
       const receipt = ctx.chain.mineBlock([
-        proposal.fund(funder, mia.address, 0, 100),
+        proposal.fund(funder, mia.address, 1, 100),
       ]).receipts[0];
 
       receipt.result
@@ -181,12 +212,12 @@ describe("[PROPOSE]", () => {
 
       ctx.chain.mineBlock([
         proposal.setCoin(deployer, nyc.address),
-        proposal.create(creator, nyc.address, hash, category),
+        proposal.create(creator, nyc.address, hash, category, 0),
         nyc.mint(amount, funder),
       ]);
 
       const receipt = ctx.chain.mineBlock([
-        proposal.fund(funder, mia.address, 0, 100),
+        proposal.fund(funder, mia.address, 1, 100),
       ]).receipts[0];
 
       receipt.result
@@ -199,11 +230,11 @@ describe("[PROPOSE]", () => {
       ctx.chain.mineBlock([
         proposal.setCoin(deployer, mia.address),
         proposal.setCoin(deployer, nyc.address),
-        proposal.create(creator, mia.address, hash, category),
+        proposal.create(creator, mia.address, hash, category, 0),
         nyc.mint(amount, funder),
       ]);
       const receipt = ctx.chain.mineBlock([
-        proposal.fund(funder, nyc.address, 0, 100),
+        proposal.fund(funder, nyc.address, 1, 100),
       ]).receipts[0];
 
       receipt.result
@@ -226,32 +257,95 @@ describe("[PROPOSE]", () => {
 
       ctx.chain.mineBlock([
         proposal.setCoin(deployer, mia.address),
-        proposal.create(creator, mia.address, hash, category),
+        proposal.create(creator, mia.address, hash, category, 0),
         mia.mint(amount, funder),
-        proposal.toggleActive(creator, 0),
+        proposal.toggleActive(creator, 1),
       ]);
 
       const receipt = ctx.chain.mineBlock([
-        proposal.fund(funder, mia.address, 0, 100),
+        proposal.fund(funder, mia.address, 1, 100),
       ]).receipts[0];
 
       receipt.result.expectErr().expectUint(Proposal.Err.ERR_INACTIVE_PROPOSAL);
     });
 
-    it("updates funding stats", () => {
+    it("throws an error if funding expired", () => {
       const amount = 200;
 
       ctx.chain.mineBlock([
         proposal.setCoin(deployer, mia.address),
-        proposal.create(creator, mia.address, hash, category),
+        proposal.create(creator, mia.address, hash, category, 0),
         mia.mint(amount, funder),
       ]);
 
-      ctx.chain.mineBlock([proposal.fund(funder, mia.address, 0, 100)]);
+      ctx.chain.mineEmptyBlock(2101);
+      const receipt = ctx.chain.mineBlock([
+        proposal.fund(funder, mia.address, 1, 100),
+      ]).receipts[0];
 
-      const stats = proposal.getFundingStats(mia.address, 2);
+      receipt.result
+        .expectErr()
+        .expectUint(Proposal.Err.ERR_FUNDING_EXPIRED_FOR_PROPOSAL);
+    });
+  });
 
-      assertEquals(stats, types.uint(99));
+  describe("withdrawl()", () => {
+    it("allows contract deployer to withdrawl tokens", () => {
+      const amount = 200;
+
+      ctx.chain.mineBlock([
+        proposal.setCoin(deployer, mia.address),
+        proposal.create(creator, mia.address, hash, category, 0),
+        mia.mint(amount, funder),
+      ]);
+
+      const fund = ctx.chain.mineBlock([
+        proposal.fund(funder, mia.address, 1, 200),
+      ]).receipts[0];
+
+      const receipt = ctx.chain.mineBlock([
+        proposal.withdrawl(deployer, mia.address, deployer.address, 1),
+      ]).receipts[0];
+
+      receipt.result.expectOk();
+    });
+    it("fails if owner is not caller", () => {
+      const amount = 200;
+
+      ctx.chain.mineBlock([
+        proposal.setCoin(deployer, mia.address),
+        proposal.create(creator, mia.address, hash, category, 0),
+        mia.mint(amount, funder),
+      ]);
+
+      const fund = ctx.chain.mineBlock([
+        proposal.fund(funder, mia.address, 1, 200),
+      ]).receipts[0];
+
+      const receipt = ctx.chain.mineBlock([
+        proposal.withdrawl(creator, mia.address, creator.address, 1),
+      ]).receipts[0];
+
+      receipt.result.expectErr().expectUint(Proposal.Err.ERR_UNAUTHORIZED);
+    });
+    it("fails if insufficient funds", () => {
+      const amount = 200;
+
+      ctx.chain.mineBlock([
+        proposal.setCoin(deployer, mia.address),
+        proposal.create(creator, mia.address, hash, category, 0),
+        mia.mint(amount, funder),
+      ]);
+
+      ctx.chain.mineBlock([proposal.fund(funder, mia.address, 1, 100)]);
+
+      const receipt = ctx.chain.mineBlock([
+        proposal.withdrawl(deployer, mia.address, deployer.address, 2),
+      ]).receipts[0];
+
+      receipt.result
+        .expectErr()
+        .expectUint(Proposal.Err.ERR_INSUFFICIENT_FUNDS);
     });
   });
 

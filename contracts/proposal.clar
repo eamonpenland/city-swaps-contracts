@@ -2,6 +2,7 @@
 ;; proposal
 ;; <add a description here>
 (use-trait sip-010-token .sip-010-trait-ft-standard.sip-010-trait)
+;; (use-trait 'SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE.sip-010-trait-ft-standard.sip-010-trait)
 
 ;; constants
 ;;
@@ -15,10 +16,22 @@
 (define-constant ERR_COIN_NOT_SUPPORTED u1004)
 (define-constant ERR_INCORRECT_FUNDING_SOURCE u1005)
 (define-constant ERR_INACTIVE_PROPOSAL u1006)
-(define-constant MAX_FEE_RATE u10)
+(define-constant ERR_EXTERNAL_ID_ALREADY_USED u1007)
+(define-constant FUNDING_LENGTH u2100)
+(define-constant ERR_FUNDING_EXPIRED_FOR_PROPOSAL u1008)
+(define-constant ERR_INSUFFICIENT_FUNDING_AMOUNT u1009)
 
 ;; data maps and vars
 ;;
+
+(define-data-var feeRate uint u1)
+(define-data-var next-proposal-id uint u0)
+
+
+(define-map ProposalIds
+  uint  ;; external-id
+  uint  ;; proposal-id  
+)
 
 (define-map Proposals
   uint ;; proposal-id
@@ -26,16 +39,11 @@
     poster: principal,
     category: (string-ascii 32),
     token: principal,
-    funded_amount: uint,
+    funded-amount: uint,
     hash: (buff 64),
     active: bool,
-  }
-)
-
-(define-map TreasuryAmounts
-  principal ;; token
-  {
-    amount: uint,
+    external-id: uint,
+    stacks-height: uint
   }
 )
 
@@ -47,74 +55,36 @@
   }
 )
 
-(define-map FundingStatsAtBlock
-  {
-    stacksHeight: uint,
-    city: principal,
-  }
-  uint ;; amount
-)
-
-(define-map CategoryStatsAtBlock
-  {
-    stacksHeight: uint,
-    city: principal,
-    category: (string-ascii 32),
-  }
-  uint ;; amount
-)
-
-(define-data-var feeRate uint u0) ;; defined in bp (base points)
-(define-data-var last-proposal-id uint u0)
-
 (define-read-only (get-fee-rate)
   (var-get feeRate)
 )
 
-(define-read-only (get-fee (amount uint))
-  (if (is-eq (var-get feeRate) u0)
-    u0
-    (* amount (var-get feeRate))
-  )
-)
-
-
 (define-read-only (get-proposal-count)
-  (var-get last-proposal-id)
+  (var-get next-proposal-id)
 )
 
-(define-read-only (get-proposal (proposalId uint))
-  (map-get? Proposals proposalId)
+(define-read-only (get-proposal (proposal-id uint))
+  (map-get? Proposals proposal-id)
 )
 
+(define-read-only (get-proposal-by-external-id (external-id uint))
+  (ok (get-proposal (unwrap! (map-get? ProposalIds external-id) (err ERR_PROPOSAL_NOT_FOUND))))
+)
 
 (define-read-only (get-coin-or-err (token <sip-010-token>))
-  (let (
-    (city (unwrap! (map-get? CityCoins (contract-of token)) (err u1)))
-  )
-    (ok city)
-  )
+  (ok (unwrap! (map-get? CityCoins (contract-of token)) (err u1)))
 )
-
 
 ;; private functions
 ;;
 
-;; (define-private (update-treasury (token <sip-010-token>) (amount uint))
-;;   (asserts! (is-ok ()) (err TRANSFER_FAILED))
-;; )
+
+(define-private (get-fee (amount uint))
+  (/ (* (var-get feeRate) amount) u100)
+)
 
 ;; public functions
 ;;
-
-(define-public (set-fee-rate (newFeeRate uint))
-  (begin
-    (asserts! (<= newFeeRate MAX_FEE_RATE) (err ERR_INVALID_VALUE))
-    (asserts! (is-eq tx-sender CONTRACT_OWNER) (err ERR_UNAUTHORIZED))
-    (var-set feeRate newFeeRate)
-    (ok true)
-  )
-)
 
 (define-public (set-token (token <sip-010-token>))
   (begin
@@ -135,18 +105,28 @@
     (token <sip-010-token>)
     (hash (buff 64)) 
     (category (string-ascii 32)) 
+    (external-id uint)
 )
-  (begin
-    (asserts! (is-ok (get-coin-or-err token)) (err ERR_COIN_NOT_SUPPORTED))
-    (map-set Proposals (var-get last-proposal-id) {
-      poster: tx-sender, 
-      category: category, 
-      token: (contract-of token), 
-      funded_amount: u0,
-      hash: hash,
-      active: true
-    })
-    (ok (var-set last-proposal-id (+ (var-get last-proposal-id) u1)))
+  (let
+    (
+      (next-id (+ (var-get next-proposal-id) u1))
+    )
+    (begin 
+      (asserts! (is-none (map-get? ProposalIds external-id)) (err ERR_EXTERNAL_ID_ALREADY_USED))
+      (asserts! (is-ok (get-coin-or-err token)) (err ERR_COIN_NOT_SUPPORTED))
+      (map-set Proposals next-id {
+        poster: tx-sender, 
+        category: category, 
+        token: (contract-of token), 
+        funded-amount: u0,
+        hash: hash,
+        active: true,
+        external-id: external-id,
+        stacks-height: block-height
+      })
+      (map-set ProposalIds external-id next-id)
+      (ok (var-set next-proposal-id next-id))
+    )
   )
 )
 
@@ -195,62 +175,28 @@
       (
         (proposal (unwrap! (get-proposal proposal-id) (err ERR_PROPOSAL_NOT_FOUND)))
         (recipient (get poster proposal))
-        (txFee (/ (get-fee amount) amount))
+        (txFee (get-fee amount))
         (txAmount (- amount txFee))
       )
+      (asserts! (>= amount u100) (err ERR_INSUFFICIENT_FUNDING_AMOUNT))
+      (asserts! (<= (- block-height (get stacks-height proposal)) FUNDING_LENGTH) (err ERR_FUNDING_EXPIRED_FOR_PROPOSAL))
       (asserts! (is-eq (get active proposal) true) (err ERR_INACTIVE_PROPOSAL))
       (asserts! (is-ok (get-coin-or-err token)) (err ERR_COIN_NOT_SUPPORTED))
       (asserts! (is-eq (get token proposal) (contract-of token)) (err ERR_INCORRECT_FUNDING_SOURCE))
       (asserts! (is-ok (contract-call? token transfer txAmount tx-sender recipient none)) (err ERR_INSUFFICIENT_FUNDS))
       (asserts! (is-ok (contract-call? token transfer txFee tx-sender CONTRACT_ADDRESS none)) (err ERR_FEE_TRANSFER_FAILED))
-      (asserts! (is-ok (update-stats proposal-id txAmount)) (err u1))
       (ok (map-set Proposals proposal-id (
         merge proposal {
-            funded_amount: (+ (get funded_amount proposal) txAmount)
+            funded-amount: (+ (get funded-amount proposal) txAmount)
         }
       )))
   )
 )
 
-(define-private (update-stats (proposal-id uint) (txAmount uint))
-  (let (
-    (proposal (unwrap! (get-proposal proposal-id) (err ERR_PROPOSAL_NOT_FOUND)))
-    (token (as-contract (get token proposal)))
-    (category (get category proposal))
-    (fundingStatsAtBlock (get-funding-stats-at-block-or-default token block-height))
-    (categoryStatsAtBlock (get-category-stats-at-block-or-default token block-height category))
-  )
-    (begin 
-      (map-set FundingStatsAtBlock {stacksHeight: block-height, city: token}
-        (+ fundingStatsAtBlock txAmount)
-      )
-      (map-set CategoryStatsAtBlock {stacksHeight: block-height, city: token, category: category} 
-        (+ categoryStatsAtBlock txAmount)
-      )
-      (ok true)
-    )
+(define-public (withdrawl-fees (token <sip-010-token>) (recipient principal) (amount uint))
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT_OWNER) (err ERR_UNAUTHORIZED))
+    (asserts! (is-ok (as-contract (contract-call? token transfer amount CONTRACT_ADDRESS recipient none))) (err ERR_INSUFFICIENT_FUNDS))
+    (ok true)
   )
 )
-
-(define-public (withdraw-fees)
-  (as-contract (stx-transfer? (stx-get-balance CONTRACT_ADDRESS) CONTRACT_ADDRESS CONTRACT_OWNER))
-)
-
-(define-read-only (get-funding-stats-at-block-or-default (city principal) (stacksHeight uint))
-  (default-to  u0
-    (map-get? FundingStatsAtBlock {stacksHeight: stacksHeight, city: city})
-  )
-)
-
-(define-read-only (get-category-stats-at-block-or-default (city principal) (stacksHeight uint) (category (string-ascii 32)))
-  (default-to  u0
-    (map-get? CategoryStatsAtBlock {stacksHeight: stacksHeight, city: city, category: category})
-  )
-)
-
-(define-public (initialize-contract)
-  (set-fee-rate u1)
-)
-
-(initialize-contract)
-

@@ -10,16 +10,30 @@ enum Err {
   ERR_COIN_NOT_SUPPORTED = 1004,
   ERR_INCORRECT_FUNDING_SOURCE = 1005,
   ERR_INACTIVE_PROPOSAL = 1006,
+  ERR_EXTERNAL_ID_ALREADY_USED = 1007,
+  ERR_FUNDING_EXPIRED_FOR_PROPOSAL = 1008,
+  ERR_INSUFFICIENT_FUNDING_AMOUNT = 1009,
 }
 
 export class Proposal extends Model {
   name: string = "proposal";
   static Err = Err;
 
-  create(creator: Account, token: string, hash: Uint8Array, category: string) {
+  create(
+    creator: Account,
+    token: string,
+    hash: Uint8Array,
+    category: string,
+    external_id: number
+  ) {
     return this.callPublic(
       "create",
-      [types.principal(token), types.buff(hash), types.ascii(category)],
+      [
+        types.principal(token),
+        types.buff(hash),
+        types.ascii(category),
+        types.uint(external_id),
+      ],
       creator
     );
   }
@@ -41,6 +55,14 @@ export class Proposal extends Model {
       "fund",
       [types.principal(token), types.uint(proposalId), types.uint(amount)],
       funder
+    );
+  }
+
+  withdrawl(owner: Account, token: string, recipient: string, amount: number) {
+    return this.callPublic(
+      "withdrawl-fees",
+      [types.principal(token), types.principal(recipient), types.uint(amount)],
+      owner
     );
   }
 
